@@ -312,6 +312,16 @@ def _slim_producto(p: dict) -> dict:
     })
 
 
+def _origen_documento(email: str, vendedor: str) -> str:
+    """Detecta el origen del documento basado en email del cliente y vendedor."""
+    if email and "@marketplace.com" in email.lower():
+        return "MercadoLibre"
+    info = _lookup_canal(vendedor) if vendedor else None
+    if info:
+        return info.get("canal", "Desconocido")
+    return "Desconocido"
+
+
 def _slim_documento(d: dict) -> dict:
     dt = d.get("documentType") or {}
     cl = d.get("client") or {}
@@ -319,6 +329,8 @@ def _slim_documento(d: dict) -> dict:
     us = d.get("salesmanUser") or {}
     nombre_cli = f"{cl.get('firstName', '')} {cl.get('lastName', '')}".strip()
     nombre_vendedor = f"{us.get('firstName', '')} {us.get('lastName', '')}".strip()
+    email = cl.get("email") or ""
+    origen = _origen_documento(email, nombre_vendedor)
     return _compact({
         "id":          d.get("id"),
         "numero":      d.get("number"),
@@ -330,7 +342,8 @@ def _slim_documento(d: dict) -> dict:
         "tipo_id":     dt.get("id"),
         "cliente":     nombre_cli,
         "cliente_id":  cl.get("id"),
-        "email":       cl.get("email"),
+        "email":       email or None,
+        "origen":      origen,
         "sucursal":    of.get("name"),
         "sucursal_id": of.get("id"),
         "vendedor":    nombre_vendedor,
@@ -913,6 +926,81 @@ async def resumen_por_canal(fecha_inicio: str, fecha_fin: str) -> dict:
 
 
 # ── PRODUCTOS / VARIANTES AVANZADO ───────────────────────────────
+
+@mcp.tool()
+@_monitor
+async def ventas_meli(fecha_inicio: str, fecha_fin: str) -> dict:
+    """Ventas de Mercado Libre detectadas por email @marketplace.com del cliente.
+    Pagina todos los documentos del período, busca el cliente de cada uno y filtra por email.
+    Fechas en YYYY-MM-DD."""
+    try:
+        ts_i = _ts(fecha_inicio)
+        ts_f = _ts(fecha_fin) + 86399
+    except ValueError:
+        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+
+    docs = await _paginar(
+        "documents.json",
+        {"emissiondaterange": f"[{ts_i},{ts_f}]"},
+        max_registros=2000,
+    )
+    if not docs:
+        return {"periodo": {"desde": fecha_inicio, "hasta": fecha_fin},
+                "total_ventas": 0, "total_pedidos": 0, "moneda": "CLP", "documentos": []}
+
+    # IDs de cliente únicos presentes en el período
+    client_ids = list({
+        str(d["client"]["id"])
+        for d in docs
+        if (d.get("client") or {}).get("id")
+    })
+
+    # Buscar clientes en lotes de 10 en paralelo
+    client_cache: dict[str, dict] = {}
+
+    async def _get_client(cid: str) -> tuple[str, dict]:
+        data = await _request("GET", f"clients/{cid}.json")
+        return cid, data
+
+    for i in range(0, len(client_ids), 10):
+        results = await asyncio.gather(*[_get_client(cid) for cid in client_ids[i:i + 10]])
+        for cid, data in results:
+            if "error" not in data:
+                client_cache[cid] = data
+
+    # Filtrar documentos cuyo cliente tiene email @marketplace.com
+    meli_docs = []
+    total_ventas = 0.0
+
+    for d in docs:
+        cid  = str((d.get("client") or {}).get("id", ""))
+        cli  = client_cache.get(cid, {})
+        email = (cli.get("email") or "").lower()
+        if "@marketplace.com" not in email:
+            continue
+        monto = float(d.get("totalAmount") or 0)
+        total_ventas += monto
+        nombre = f"{cli.get('firstName', '')} {cli.get('lastName', '')}".strip()
+        meli_docs.append(_compact({
+            "id":      d.get("id"),
+            "numero":  d.get("number"),
+            "fecha":   _fecha(d.get("emissionDate")),
+            "total":   round(monto),
+            "cliente": nombre,
+            "email":   cli.get("email"),
+        }))
+
+    ticket_promedio = round(total_ventas / len(meli_docs)) if meli_docs else 0
+
+    return _compact({
+        "periodo":         {"desde": fecha_inicio, "hasta": fecha_fin},
+        "total_ventas":    round(total_ventas),
+        "total_pedidos":   len(meli_docs),
+        "ticket_promedio": ticket_promedio,
+        "moneda":          "CLP",
+        "documentos":      meli_docs,
+    })
+
 
 @mcp.tool()
 @_monitor
