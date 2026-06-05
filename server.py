@@ -55,6 +55,68 @@ LOG_FILE = Path(_log_path_str) if _log_path_str else (
     Path(__file__).parent / "bsale_mcp.log" if TRANSPORT == "stdio" else None
 )
 
+# ═══════════════════════════════════════════════════════════════
+# [1b] MAPA VENDEDOR → CANAL / SUCURSAL
+#      Clave: nombre del vendedor en Bsale normalizado (minúsculas, sin espacios dobles)
+#      canal: "Tienda" | "Internet" | "B2B" | "Widit"
+# ═══════════════════════════════════════════════════════════════
+
+VENDEDOR_CANAL: dict[str, dict] = {
+    # ── Tienda física ──────────────────────────────────────────
+    "bianca plaza":           {"sucursal": "Apoquindo",           "canal": "Tienda"},
+    "constanza castillo":     {"sucursal": "Apoquindo",           "canal": "Tienda"},
+    "catalina suarez":        {"sucursal": "Apoquindo",           "canal": "Tienda"},
+    "maria jose henriquez":   {"sucursal": "Apoquindo",           "canal": "Tienda"},
+    "magdalena perez":        {"sucursal": "Comicon",             "canal": "Tienda"},
+    "benjamin perez":         {"sucursal": "Comicon",             "canal": "Tienda"},
+    "easton outlet":          {"sucursal": "Easton",              "canal": "Tienda"},
+    "ventas outlet":          {"sucursal": "Easton",              "canal": "Tienda"},
+    "open kennedy":           {"sucursal": "Open Kennedy",        "canal": "Tienda"},
+    "camila cardenas":        {"sucursal": "Open Kennedy",        "canal": "Tienda"},
+    "portal la dehesa":       {"sucursal": "La Dehesa",           "canal": "Tienda"},
+    "sucursal la dehesa":     {"sucursal": "La Dehesa",           "canal": "Tienda"},
+    "nicolas cardenas":       {"sucursal": "La Dehesa",           "canal": "Tienda"},
+    "mall sport":             {"sucursal": "Mall Sport",          "canal": "Tienda"},
+    "mall sport 2":           {"sucursal": "Mall Sport",          "canal": "Tienda"},
+    "parque arauco":          {"sucursal": "Parque Arauco",       "canal": "Tienda"},
+    "mall plaza vespucio":    {"sucursal": "Mall Plaza Vespucio", "canal": "Tienda"},
+    "luana valotta":          {"sucursal": "Tienda",              "canal": "Tienda"},
+    "ximena tapia":           {"sucursal": "Tienda",              "canal": "Tienda"},
+    "roberto morales":        {"sucursal": "Tienda",              "canal": "Tienda"},
+    "cinthya olivares":       {"sucursal": "Tienda",              "canal": "Tienda"},
+    "constanza letelier":     {"sucursal": "Tienda",              "canal": "Tienda"},
+    "lucas mosqueira":        {"sucursal": "Tienda",              "canal": "Tienda"},
+    "america":                {"sucursal": "Tienda",              "canal": "Tienda"},
+    # ── Internet / ecommerce / apps ───────────────────────────
+    "loading play connect":   {"sucursal": "Internet",            "canal": "Internet"},
+    "venta internet":         {"sucursal": "Internet",            "canal": "Internet"},
+    "mercado libre carnaval": {"sucursal": "Mercado Libre",       "canal": "Internet"},
+    "uber eats":              {"sucursal": "Apps",                "canal": "Internet"},
+    "rappi carnaval":         {"sucursal": "Apps",                "canal": "Internet"},
+    "falabella carnaval":     {"sucursal": "Internet",            "canal": "Internet"},
+    "paris carnaval":         {"sucursal": "Internet",            "canal": "Internet"},
+    "vicente iturriaga":      {"sucursal": "Fondas",              "canal": "Internet"},
+    # ── B2B ───────────────────────────────────────────────────
+    "dayana acosta":          {"sucursal": "B2B",                 "canal": "B2B"},
+    "simon catalan":          {"sucursal": "B2B",                 "canal": "B2B"},
+    "stephanie salamanca":    {"sucursal": "B2B",                 "canal": "B2B"},
+    "leandro turchan":        {"sucursal": "B2B",                 "canal": "B2B"},
+    "rodrigo morales":        {"sucursal": "B2B",                 "canal": "B2B"},
+    "miguel vallejos":        {"sucursal": "B2B",                 "canal": "B2B"},
+    "hernan sandoval":        {"sucursal": "B2B",                 "canal": "B2B"},
+    "gabriela soto":          {"sucursal": "B2B",                 "canal": "B2B"},
+    # ── Widit ─────────────────────────────────────────────────
+    "maria jesus varela":         {"sucursal": "Widit",           "canal": "Widit"},
+    "maria elizabeth duarte":     {"sucursal": "Widit",           "canal": "Widit"},
+    "venta internet colab/widit": {"sucursal": "Widit",           "canal": "Widit"},
+}
+
+
+def _lookup_canal(nombre: str) -> dict | None:
+    """Devuelve {canal, sucursal} para un nombre de vendedor. Normaliza mayúsculas y espacios."""
+    key = " ".join(nombre.lower().split())
+    return VENDEDOR_CANAL.get(key)
+
 
 # ═══════════════════════════════════════════════════════════════
 # [8] OBSERVABILIDAD
@@ -253,17 +315,25 @@ def _slim_producto(p: dict) -> dict:
 def _slim_documento(d: dict) -> dict:
     dt = d.get("documentType") or {}
     cl = d.get("client") or {}
+    of = d.get("office") or {}
+    us = d.get("salesmanUser") or {}
     nombre_cli = f"{cl.get('firstName', '')} {cl.get('lastName', '')}".strip()
+    nombre_vendedor = f"{us.get('firstName', '')} {us.get('lastName', '')}".strip()
     return _compact({
-        "id":         d.get("id"),
-        "numero":     d.get("number"),
-        "fecha":      _fecha(d.get("emissionDate")),
-        "total":      d.get("totalAmount"),
-        "neto":       d.get("netAmount"),
-        "iva":        d.get("taxAmount"),
-        "tipo":       dt.get("name"),
-        "cliente":    nombre_cli,
-        "cliente_id": cl.get("id"),
+        "id":          d.get("id"),
+        "numero":      d.get("number"),
+        "fecha":       _fecha(d.get("emissionDate")),
+        "total":       d.get("totalAmount"),
+        "neto":        d.get("netAmount"),
+        "iva":         d.get("taxAmount"),
+        "tipo":        dt.get("name"),
+        "tipo_id":     dt.get("id"),
+        "cliente":     nombre_cli,
+        "cliente_id":  cl.get("id"),
+        "email":       cl.get("email"),
+        "sucursal":    of.get("name"),
+        "sucursal_id": of.get("id"),
+        "vendedor":    nombre_vendedor,
     })
 
 
@@ -548,8 +618,10 @@ async def listar_documentos(
     if tipo_documento_id: params["documenttypeid"] = tipo_documento_id
     if cliente_id:        params["clientid"]       = cliente_id
     try:
-        if fecha_inicio: params["emissiondatestart"] = _ts(fecha_inicio)
-        if fecha_fin:    params["emissiondateend"]   = _ts(fecha_fin) + 86399
+        if fecha_inicio or fecha_fin:
+            ts_i = _ts(fecha_inicio) if fecha_inicio else 0
+            ts_f = (_ts(fecha_fin) + 86399) if fecha_fin else int(time.time())
+            params["emissiondaterange"] = f"[{ts_i},{ts_f}]"
     except ValueError:
         return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
     data = await _request("GET", "documents.json", params=params)
@@ -703,10 +775,8 @@ async def resumen_pagos(
     except ValueError:
         return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
 
-    # Paginar documentos con filtro de fecha (confirmado funcionando)
     params_docs: dict = {
-        "emissiondatestart": ts_inicio,
-        "emissiondateend":   ts_fin,
+        "emissiondaterange": f"[{ts_inicio},{ts_fin}]",
     }
     if sucursal_id:
         params_docs["officeid"] = sucursal_id
@@ -752,17 +822,8 @@ async def resumen_pagos(
     })
 
 
-@mcp.tool()
-@_monitor
-async def ranking_vendedores(fecha_inicio: str, fecha_fin: str) -> dict:
-    """Ventas por vendedor en un período. Incluye devoluciones descontadas.
-    1 llamada a Bsale. Útil para desempeño del equipo de ventas."""
-    try:
-        ts_inicio = _ts(fecha_inicio)
-        ts_fin    = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
-
+async def _fetch_sellers(ts_inicio: int, ts_fin: int) -> list[dict] | dict:
+    """Llama a users/sales_summary.json y devuelve lista de vendedores enriquecidos con canal."""
     data = await _request("GET", "users/sales_summary.json", params={
         "startdate": ts_inicio,
         "enddate":   ts_fin,
@@ -770,29 +831,84 @@ async def ranking_vendedores(fecha_inicio: str, fecha_fin: str) -> dict:
     if "error" in data:
         return data
 
-    sellers_raw = data.get("sellers") or []
+    result = []
+    for s in (data.get("sellers") or []):
+        nombre = s.get("fullName") or f"Usuario {s.get('id')}"
+        ventas = round(float(s.get("subtotal") or 0))
+        neto   = round(float(s.get("total")    or s.get("subtotal") or 0))
+        info   = _lookup_canal(nombre) or {}
+        result.append(_compact({
+            "nombre":    nombre,
+            "canal":     info.get("canal", "Desconocido"),
+            "sucursal":  info.get("sucursal"),
+            "ventas":    ventas,
+            "neto":      neto,
+        }))
+    return sorted(result, key=lambda x: x.get("ventas", 0), reverse=True)
 
-    vendedores = sorted(
+
+@mcp.tool()
+@_monitor
+async def ranking_vendedores(fecha_inicio: str, fecha_fin: str) -> dict:
+    """Ventas por vendedor en un período con canal y sucursal identificados.
+    1 llamada a Bsale. Útil para desempeño del equipo de ventas."""
+    try:
+        ts_inicio = _ts(fecha_inicio)
+        ts_fin    = _ts(fecha_fin) + 86399
+    except ValueError:
+        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+
+    vendedores = await _fetch_sellers(ts_inicio, ts_fin)
+    if isinstance(vendedores, dict) and "error" in vendedores:
+        return vendedores
+
+    return {
+        "periodo":   {"desde": fecha_inicio, "hasta": fecha_fin},
+        "total":     sum(v.get("ventas", 0) for v in vendedores),
+        "moneda":    "CLP",
+        "vendedores": vendedores,
+    }
+
+
+@mcp.tool()
+@_monitor
+async def resumen_por_canal(fecha_inicio: str, fecha_fin: str) -> dict:
+    """Ventas agrupadas por canal (Tienda / Internet / B2B / Widit) usando el mapa de vendedores.
+    Incluye participación porcentual de cada canal. 1 llamada a Bsale."""
+    try:
+        ts_inicio = _ts(fecha_inicio)
+        ts_fin    = _ts(fecha_fin) + 86399
+    except ValueError:
+        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+
+    vendedores = await _fetch_sellers(ts_inicio, ts_fin)
+    if isinstance(vendedores, dict) and "error" in vendedores:
+        return vendedores
+
+    canales: dict[str, float] = {}
+    for v in vendedores:
+        canal = v.get("canal", "Desconocido")
+        canales[canal] = canales.get(canal, 0.0) + v.get("ventas", 0)
+
+    total = sum(canales.values()) or 1
+    desglose = sorted(
         [
-            _compact({
-                "nombre":       s.get("fullName") or f"Usuario {s.get('id')}",
-                "ventas":       round(float(s.get("subtotal")    or 0)),
-                "devoluciones": round(float(s.get("taxSubtotal") or 0)),
-                "neto":         round(float(s.get("subtotal")    or 0) - float(s.get("taxSubtotal") or 0)),
-            })
-            for s in sellers_raw
+            {
+                "canal":        canal,
+                "ventas":       round(monto),
+                "participacion": round(monto / total * 100, 1),
+            }
+            for canal, monto in canales.items()
         ],
-        key=lambda x: x.get("neto", 0),
+        key=lambda x: x["ventas"],
         reverse=True,
     )
 
-    total_vendedores = sum(v.get("ventas", 0) for v in vendedores)
-
     return {
-        "periodo":           {"desde": fecha_inicio, "hasta": fecha_fin},
-        "total_vendedores":  total_vendedores,
-        "moneda":            "CLP",
-        "vendedores":        vendedores,
+        "periodo":   {"desde": fecha_inicio, "hasta": fecha_fin},
+        "total":     round(total),
+        "moneda":    "CLP",
+        "por_canal": desglose,
     }
 
 
