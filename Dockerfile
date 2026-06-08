@@ -2,19 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependencias Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Código
-COPY server.py .
+# Copiar todos los módulos del servidor
+COPY server.py config.py http_client.py cache.py transforms.py monitor.py domain.py ./
+COPY tools/ ./tools/
 
-# Puerto que expone el servidor SSE
 EXPOSE 8000
 
 # Variables de entorno requeridas (se inyectan en el panel de la plataforma)
