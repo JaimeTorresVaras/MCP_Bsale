@@ -19,6 +19,7 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 | `reposicion_sugerida` | Qué reponer primero (stock bajo ordenado por margen) |
 | `ranking_rentabilidad` | Productos por margen % (más/menos rentables) |
 | `valorizacion_inventario` | Capital invertido en stock (cantidad × costo) |
+| `ventas_producto` | Unidades vendidas, ingreso, margen y sucursales de un producto en un período |
 | `configuracion` | Sucursales, tipos de doc, listas de precio, etc. |
 | `listar_documentos` | Ventas/documentos con filtros de fecha |
 | `resumen_ventas` | Totales neto/IVA/bruto con desglose por tipo |
@@ -45,6 +46,7 @@ Las herramientas están pensadas para preguntas breves y cotidianas:
 - **Clientes:** por nombre, apellido, email o RUT (coincidencia parcial).
 - **Stock:** por nombre de producto (`consultar_stock` con `producto_id`), con nombres de sucursal.
 - **Análisis de rentabilidad:** Bsale entrega costo (`averageCost`) y valorización (`totalCost`); con eso se calcula margen y capital invertido. Para preguntas como *"analiza el vaso frozen"*, *"¿cuánto margino en X?"*, *"¿qué reponer primero?"*, *"¿dónde tengo la plata parada?"*. Nota: productos sin costo cargado en Bsale se muestran sin margen (no como 100%).
+- **Ventas por producto:** `ventas_producto` cruza producto × período × sucursal (unidades, ingreso, margen). Para *"¿cuánto vendí de X este año?"*, *"¿dónde se vendió X?"*. Escanea los documentos del período (la 1ª consulta de un período largo tarda ~30s, luego usa caché de 30 min).
 
 ---
 

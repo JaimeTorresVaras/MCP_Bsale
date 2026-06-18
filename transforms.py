@@ -112,6 +112,9 @@ def _parse_periodo(inicio: str = None, fin: str = None, por_defecto: str = "mes"
         if por_defecto == "mes":
             hoy = _hoy()
             desde, hasta = hoy.replace(day=1), hoy
+        elif por_defecto == "anio":
+            hoy = _hoy()
+            desde, hasta = hoy.replace(month=1, day=1), hoy
         else:
             return None, None, None, None
     else:

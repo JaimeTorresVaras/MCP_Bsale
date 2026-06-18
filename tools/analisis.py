@@ -1,9 +1,9 @@
 from config import mcp
-from transforms import _compact
+from transforms import _compact, _parse_periodo
 from domain import (
     _buscar_productos, _variantes_de_producto, _costo_variante, _precio_neto,
     _lista_precio_default, _stock_variante, _agrupar_stocks, _nombres_de_productos,
-    _en_lotes,
+    _ventas_por_variante, _en_lotes,
 )
 from monitor import _monitor
 
@@ -62,6 +62,50 @@ async def analisis_producto(consulta: str, sucursal_id: int = None) -> dict:
             "variantes":         [e["fila"] for e in enr],
         }))
     return {"moneda": "CLP", "productos": salida}
+
+
+@mcp.tool()
+@_monitor
+async def ventas_producto(consulta: str, fecha_inicio: str = None, fecha_fin: str = None) -> dict:
+    """Unidades vendidas, ingreso, margen y sucursales de un producto en un período.
+    Para '¿cuánto vendí de X este año?', '¿cuánto marginé en X?', '¿dónde se vendió X?'.
+    Período en lenguaje natural (hoy/mes/mes_pasado/año/ultimos_30...) o YYYY-MM-DD;
+    sin fecha usa el año en curso. La primera consulta de un período largo puede tardar
+    ~30s (escanea los documentos); luego queda en caché. Margen aproximado (costo promedio actual)."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="anio")
+    productos = await _buscar_productos(consulta, limite=5)
+    if not productos:
+        return {"nota": f"No se encontraron productos para '{consulta}'."}
+    ventas = await _ventas_por_variante(ts_i, ts_f)
+
+    async def _analizar(p):
+        variantes = await _variantes_de_producto(p["id"])
+        unidades = ingreso = costo_total = 0.0
+        por_suc: dict = {}
+        for v in variantes:
+            vd = ventas.get(int(v["id"]))
+            if not vd:
+                continue
+            unidades += vd["cantidad"]
+            ingreso  += vd["ingreso"]
+            c = await _costo_variante(v["id"])
+            costo_total += c["costo"] * vd["cantidad"]
+            for s, q in vd["por_sucursal"].items():
+                por_suc[s] = por_suc.get(s, 0.0) + q
+        margen = ingreso - costo_total
+        return _compact({
+            "producto_id":       p["id"],
+            "producto":          p.get("name"),
+            "unidades_vendidas": round(unidades, 2),
+            "ingreso_neto":      round(ingreso),
+            "margen_neto":       round(margen) if costo_total else None,
+            "margen_pct":        round(margen / ingreso * 100, 1) if ingreso and costo_total else None,
+            "por_sucursal":      [{"sucursal": s, "unidades": round(q, 2)}
+                                  for s, q in sorted(por_suc.items(), key=lambda x: -x[1])] or None,
+        })
+
+    resultado = await _en_lotes(_analizar, productos, batch=5)
+    return {"periodo": {"desde": desde, "hasta": hasta}, "moneda": "CLP", "productos": resultado}
 
 
 @mcp.tool()

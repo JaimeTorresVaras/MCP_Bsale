@@ -3,7 +3,7 @@ import difflib
 from typing import Optional
 from http_client import _request, _paginar
 from cache import _cache_get, _cache_set
-from transforms import _slim_producto, _compact
+from transforms import _slim_producto, _compact, _norm
 from config import _lookup_canal, MAX_LIMIT
 
 
@@ -193,3 +193,54 @@ async def _en_lotes(fn, items: list, batch: int = 10) -> list:
     for i in range(0, len(items), batch):
         salida.extend(await asyncio.gather(*[fn(x) for x in items[i:i + batch]]))
     return salida
+
+
+def _es_venta(doc: dict) -> bool:
+    """Excluye notas de crédito / devoluciones / anulaciones del conteo de ventas."""
+    n = _norm((doc.get("document_type") or {}).get("name") or "")
+    return not any(x in n for x in ("credito", "devolucion", "anulacion"))
+
+
+async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
+    """Mapa {variante_id: {cantidad, ingreso, por_sucursal}} de ventas del período.
+    Escanea documentos con líneas y sucursal embebidas (concurrente) y cachea 30 min."""
+    clave = f"ventas_var_{ts_i}_{ts_f}"
+    cached = _cache_get(clave)
+    if cached is not None:
+        return cached
+
+    base = {"emissiondaterange": f"[{ts_i},{ts_f}]", "limit": MAX_LIMIT, "expand": "[details,office]"}
+
+    async def _pagina(off: int) -> list:
+        for intento in range(3):  # reintenta ante rate-limit (429) para no perder páginas
+            d = await _request("GET", "documents.json", params={**base, "offset": off})
+            if "error" not in d:
+                return d.get("items", [])
+            await asyncio.sleep(1.5 * (intento + 1))
+        return []
+
+    primera = await _request("GET", "documents.json", params={**base, "offset": 0})
+    if "error" in primera:
+        return {}
+    docs = list(primera.get("items", []))
+    offsets = list(range(MAX_LIMIT, primera.get("count", 0), MAX_LIMIT))
+    for lote in await _en_lotes(_pagina, offsets, batch=12):
+        docs.extend(lote)
+
+    mapa: dict[int, dict] = {}
+    for doc in docs:
+        if not _es_venta(doc):
+            continue
+        office = (doc.get("office") or {}).get("name") or "Sin sucursal"
+        for li in ((doc.get("details") or {}).get("items") or []):
+            vid = (li.get("variant") or {}).get("id")
+            if not vid:
+                continue
+            vid = int(vid)
+            e = mapa.setdefault(vid, {"cantidad": 0.0, "ingreso": 0.0, "por_sucursal": {}})
+            qty = float(li.get("quantity") or 0)
+            e["cantidad"] += qty
+            e["ingreso"]  += float(li.get("netAmount") or 0)
+            e["por_sucursal"][office] = e["por_sucursal"].get(office, 0.0) + qty
+    _cache_set(clave, mapa, ttl=1800)
+    return mapa
