@@ -17,6 +17,7 @@ from config import mcp, TRANSPORT, SSE_HOST, SSE_PORT, BSALE_TOKEN, log
 import tools.clientes     # noqa: F401
 import tools.productos    # noqa: F401
 import tools.stock        # noqa: F401
+import tools.analisis     # noqa: F401
 import tools.documentos   # noqa: F401
 import tools.ventas       # noqa: F401
 import tools.logistica    # noqa: F401

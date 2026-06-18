@@ -13,8 +13,12 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 | `crear_cliente` | Crear un nuevo cliente |
 | `buscar_producto` | Busca por nombre parcial; admite varias palabras en cualquier orden |
 | `consultar_stock` | Stock disponible por producto, variante o sucursal |
-| `top_stock` | Ranking de variantes con más stock |
-| `analizar_stock_critico` | SKUs bajo un umbral de reposición |
+| `top_stock` | Ranking de productos con más stock (con nombre) |
+| `analizar_stock_critico` | Productos bajo un umbral de reposición (con nombre) |
+| `analisis_producto` | Stock + costo + precio + margen + capital invertido de un producto |
+| `reposicion_sugerida` | Qué reponer primero (stock bajo ordenado por margen) |
+| `ranking_rentabilidad` | Productos por margen % (más/menos rentables) |
+| `valorizacion_inventario` | Capital invertido en stock (cantidad × costo) |
 | `configuracion` | Sucursales, tipos de doc, listas de precio, etc. |
 | `listar_documentos` | Ventas/documentos con filtros de fecha |
 | `resumen_ventas` | Totales neto/IVA/bruto con desglose por tipo |
@@ -23,8 +27,8 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 | `resumen_pagos` | Desglose por medio de pago |
 | `ranking_vendedores` | Ventas por vendedor en un período |
 | `buscar_variante` | Busca variantes por código, barcode, SKU |
-| `precio_variante` | Precio en una lista de precio |
-| `costo_variante` | Costo promedio y cálculo de margen |
+| `precio_variante` | Precio de venta (neto y bruto) de una variante |
+| `costo_variante` | Costo, valorización en inventario y margen de una variante |
 | `listar_devoluciones` | Devoluciones por período/sucursal |
 | `documentos_proveedor` | Facturas de proveedores |
 | `listar_despachos` | Despachos/envíos |
@@ -40,6 +44,7 @@ Las herramientas están pensadas para preguntas breves y cotidianas:
 - **Productos:** búsqueda por nombre parcial y varias palabras en cualquier orden (ej: *"vasos frozen"*).
 - **Clientes:** por nombre, apellido, email o RUT (coincidencia parcial).
 - **Stock:** por nombre de producto (`consultar_stock` con `producto_id`), con nombres de sucursal.
+- **Análisis de rentabilidad:** Bsale entrega costo (`averageCost`) y valorización (`totalCost`); con eso se calcula margen y capital invertido. Para preguntas como *"analiza el vaso frozen"*, *"¿cuánto margino en X?"*, *"¿qué reponer primero?"*, *"¿dónde tengo la plata parada?"*. Nota: productos sin costo cargado en Bsale se muestran sin margen (no como 100%).
 
 ---
 

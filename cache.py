@@ -20,6 +20,7 @@ def _cache_get(key: str) -> Any:
     return None
 
 
-def _cache_set(key: str, value: Any) -> None:
-    ttl = _CACHE_TTL.get(key, 3600)
+def _cache_set(key: str, value: Any, ttl: int = None) -> None:
+    if ttl is None:
+        ttl = _CACHE_TTL.get(key, 3600)
     _CACHE[key] = (time.monotonic() + ttl, value)
