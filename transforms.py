@@ -1,6 +1,14 @@
+import unicodedata
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, date, timedelta, time as _time
 from config import _lookup_canal
+
+try:  # zona horaria de Chile; fallback a UTC-4 si no hay tzdata
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("America/Santiago")
+except Exception:  # pragma: no cover
+    from datetime import timezone
+    _TZ = timezone(timedelta(hours=-4))
 
 
 def _compact(obj: Any) -> Any:
@@ -18,6 +26,102 @@ def _ts(fecha_str: str) -> int:
 
 def _fecha(ts: Any) -> Optional[str]:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d") if ts else None
+
+
+# ── Fechas en lenguaje natural ──────────────────────────────────────────────
+def _hoy() -> date:
+    return datetime.now(_TZ).date()
+
+
+def _norm(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().strip()
+    return s.replace(" ", "_").replace("-", "_")
+
+
+def _ultimo_dia_mes(d: date) -> date:
+    nxt = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return nxt - timedelta(days=1)
+
+
+def _palabra_a_rango(term: str) -> Optional[tuple[date, date]]:
+    """Convierte una palabra clave normalizada en (desde, hasta). None si no aplica."""
+    hoy = _hoy()
+    fijos = {
+        "hoy": (hoy, hoy),
+        "ayer": (hoy - timedelta(days=1), hoy - timedelta(days=1)),
+        "anteayer": (hoy - timedelta(days=2), hoy - timedelta(days=2)),
+        "semana": (hoy - timedelta(days=hoy.weekday()), hoy),
+        "esta_semana": (hoy - timedelta(days=hoy.weekday()), hoy),
+        "mes": (hoy.replace(day=1), hoy),
+        "este_mes": (hoy.replace(day=1), hoy),
+        "anio": (hoy.replace(month=1, day=1), hoy),
+        "ano": (hoy.replace(month=1, day=1), hoy),
+        "este_anio": (hoy.replace(month=1, day=1), hoy),
+        "este_ano": (hoy.replace(month=1, day=1), hoy),
+    }
+    if term in fijos:
+        return fijos[term]
+    if term in ("semana_pasada", "ultima_semana"):
+        fin = hoy - timedelta(days=hoy.weekday() + 1)
+        return fin - timedelta(days=6), fin
+    if term in ("mes_pasado", "ultimo_mes"):
+        fin = hoy.replace(day=1) - timedelta(days=1)
+        return fin.replace(day=1), fin
+    if term in ("anio_pasado", "ano_pasado"):
+        return date(hoy.year - 1, 1, 1), date(hoy.year - 1, 12, 31)
+    for n in (7, 15, 30, 60, 90, 180, 365):
+        if term in (f"ultimos_{n}", f"ultimos_{n}_dias", f"{n}_dias", f"{n}dias"):
+            return hoy - timedelta(days=n - 1), hoy
+    return None
+
+
+def _a_fecha(valor: str, fin_de_mes: bool = False) -> Optional[date]:
+    """Parsea 'YYYY-MM-DD' o 'YYYY-MM' (mes -> primer o último día)."""
+    v = valor.strip()
+    try:
+        if len(v) == 7:
+            d = datetime.strptime(v, "%Y-%m").date()
+            return _ultimo_dia_mes(d) if fin_de_mes else d
+        return datetime.strptime(v[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _rango_ts(desde: date, hasta: date) -> tuple[int, int]:
+    ts_i = int(datetime.combine(desde, _time.min, _TZ).timestamp())
+    ts_f = int(datetime.combine(hasta, _time.max, _TZ).timestamp())
+    return ts_i, ts_f
+
+
+def _parse_periodo(inicio: str = None, fin: str = None, por_defecto: str = "mes"):
+    """Interpreta un período en lenguaje natural o fechas exactas.
+    Devuelve (ts_inicio, ts_fin, desde_iso, hasta_iso); (None, None, None, None) si
+    no hay nada y por_defecto es None.
+    Acepta: 'hoy', 'ayer', 'semana', 'mes', 'mes_pasado', 'año', 'ultimos_7', etc.,
+    o 'YYYY-MM-DD' / 'YYYY-MM'. Sin datos usa por_defecto ('mes' = mes en curso)."""
+    if inicio:
+        rango = _palabra_a_rango(_norm(inicio))
+        if rango:
+            desde, hasta = rango
+            return (*_rango_ts(desde, hasta), desde.isoformat(), hasta.isoformat())
+
+    desde = _a_fecha(inicio) if inicio else None
+    hasta = _a_fecha(fin, fin_de_mes=True) if fin else None
+
+    if desde is None and hasta is None:
+        if por_defecto == "mes":
+            hoy = _hoy()
+            desde, hasta = hoy.replace(day=1), hoy
+        else:
+            return None, None, None, None
+    else:
+        if desde is None:
+            desde = hasta.replace(day=1)
+        if hasta is None:
+            # 'YYYY-MM' solo en inicio => ese mes completo; si no, hasta hoy
+            hasta = _ultimo_dia_mes(desde) if inicio and len(inicio.strip()) == 7 else _hoy()
+
+    return (*_rango_ts(desde, hasta), desde.isoformat(), hasta.isoformat())
 
 
 def _slim_cliente(c: dict) -> dict:

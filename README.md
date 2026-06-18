@@ -32,6 +32,17 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 
 ---
 
+## Lenguaje natural
+
+Las herramientas están pensadas para preguntas breves y cotidianas:
+
+- **Fechas:** acepta `hoy`, `ayer`, `semana`, `mes`, `mes_pasado`, `año`, `ultimos_7`, `ultimos_30`, además de `YYYY-MM-DD` y `YYYY-MM`. Sin fecha, los resúmenes usan el **mes en curso** (zona horaria de Chile).
+- **Productos:** búsqueda por nombre parcial y varias palabras en cualquier orden (ej: *"vasos frozen"*).
+- **Clientes:** por nombre, apellido, email o RUT (coincidencia parcial).
+- **Stock:** por nombre de producto (`consultar_stock` con `producto_id`), con nombres de sucursal.
+
+---
+
 ## Solución de problemas
 
 **Error: BSALE_API_TOKEN no configurado**  

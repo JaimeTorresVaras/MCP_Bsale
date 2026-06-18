@@ -1,7 +1,7 @@
 from config import mcp, MAX_LIMIT
 from http_client import _request
 from transforms import _slim_stock, _compact
-from domain import _agrupar_stocks
+from domain import _agrupar_stocks, _nombres_de_productos
 from monitor import _monitor
 
 
@@ -54,17 +54,23 @@ async def consultar_stock(variante_id: int = None, producto_id: int = None,
 @mcp.tool()
 @_monitor
 async def top_stock(top: int = 10, sucursal_id: int = None) -> dict:
-    """Ranking de variantes con más stock. Nombre y SKU extraídos del inventario sin llamadas extra."""
+    """Ranking de productos con más stock (mayor inventario disponible). Incluye nombre y SKU."""
     agrupado = await _agrupar_stocks(sucursal_id)
     if not agrupado:
         return {"error": "No se encontraron registros de stock."}
     ranking = sorted(agrupado.items(), key=lambda x: x[1]["stock"], reverse=True)[:max(1, top)]
+    nombres = await _nombres_de_productos({info.get("producto_id") for _, info in ranking})
     return {
         "total_variantes": len(agrupado),
         "filtro_sucursal": sucursal_id,
         "top": [
-            {"ranking": i+1, "variante_id": vid, "nombre": info["nombre"],
-             "sku": info["sku"], "stock": round(info["stock"], 2)}
+            _compact({
+                "ranking":     i + 1,
+                "variante_id": vid,
+                "producto":    nombres.get(int(info["producto_id"])) if info.get("producto_id") else info["nombre"],
+                "sku":         info["sku"],
+                "stock":       round(info["stock"], 2),
+            })
             for i, (vid, info) in enumerate(ranking)
         ],
     }
@@ -73,14 +79,25 @@ async def top_stock(top: int = 10, sucursal_id: int = None) -> dict:
 @mcp.tool()
 @_monitor
 async def analizar_stock_critico(umbral: float = 5.0, sucursal_id: int = None) -> dict:
-    """SKUs con stock <= umbral que requieren reposición."""
+    """Productos con stock <= umbral que requieren reposición. Incluye nombre y SKU."""
     agrupado = await _agrupar_stocks(sucursal_id)
     if not agrupado:
         return {"error": "No se encontraron registros de stock."}
     bajos = sorted(
-        [{"variante_id": vid, "nombre": info["nombre"], "sku": info["sku"],
-          "stock": round(info["stock"], 2)}
+        [{"variante_id": vid, "producto_id": info.get("producto_id"),
+          "sku": info["sku"], "stock": round(info["stock"], 2)}
          for vid, info in agrupado.items() if info["stock"] <= umbral],
         key=lambda x: x["stock"],
     )
-    return {"umbral": umbral, "total_criticos": len(bajos), "skus_criticos": bajos[:50]}
+    top = bajos[:50]
+    nombres = await _nombres_de_productos({b["producto_id"] for b in top})
+    criticos = [
+        _compact({
+            "variante_id": b["variante_id"],
+            "producto":    nombres.get(int(b["producto_id"])) if b.get("producto_id") else None,
+            "sku":         b["sku"],
+            "stock":       b["stock"],
+        })
+        for b in top
+    ]
+    return {"umbral": umbral, "total_criticos": len(bajos), "skus_criticos": criticos}

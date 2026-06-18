@@ -1,7 +1,6 @@
-import time
 from config import mcp, MAX_LIMIT
 from http_client import _request
-from transforms import _slim_documento, _compact, _ts
+from transforms import _slim_documento, _compact, _parse_periodo
 from monitor import _monitor
 
 
@@ -12,7 +11,9 @@ async def listar_documentos(
     tipo_documento_id: int = None, cliente_id: int = None,
     limite: int = 25, pagina: int = 0,
 ) -> dict:
-    """Lista documentos de venta del más reciente al más antiguo.
+    """Lista documentos de venta (boletas/facturas) del más reciente al más antiguo.
+    Fechas en lenguaje natural ('hoy', 'ayer', 'mes', 'mes_pasado', ...) o YYYY-MM-DD;
+    sin fecha lista los más recientes.
     tipo_documento_id: obtener IDs con configuracion('tipos_documento')."""
     lim = min(max(1, limite), MAX_LIMIT)
     params: dict = {
@@ -21,13 +22,9 @@ async def listar_documentos(
     }
     if tipo_documento_id: params["documenttypeid"] = tipo_documento_id
     if cliente_id:        params["clientid"]       = cliente_id
-    try:
-        if fecha_inicio or fecha_fin:
-            ts_i = _ts(fecha_inicio) if fecha_inicio else 0
-            ts_f = (_ts(fecha_fin) + 86399) if fecha_fin else int(time.time())
-            params["emissiondaterange"] = f"[{ts_i},{ts_f}]"
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    ts_i, ts_f, _, _ = _parse_periodo(fecha_inicio, fecha_fin, por_defecto=None)
+    if ts_i is not None:
+        params["emissiondaterange"] = f"[{ts_i},{ts_f}]"
     data = await _request("GET", "documents.json", params=params)
     if "error" in data:
         return data

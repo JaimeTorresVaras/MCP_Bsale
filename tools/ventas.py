@@ -1,7 +1,7 @@
 import asyncio
 from config import mcp
 from http_client import _request, _paginar
-from transforms import _compact, _ts, _fecha
+from transforms import _compact, _fecha, _parse_periodo
 from domain import _fetch_sellers
 from monitor import _monitor
 
@@ -9,15 +9,13 @@ from monitor import _monitor
 @mcp.tool()
 @_monitor
 async def resumen_ventas(
-    fecha_inicio: str, fecha_fin: str, tipo_documento_id: int = None,
+    fecha_inicio: str = None, fecha_fin: str = None, tipo_documento_id: int = None,
 ) -> dict:
-    """Totales neto/IVA/bruto de un período con desglose por tipo de documento.
+    """¿Cuánto se vendió? Totales neto/IVA/bruto del período con desglose por tipo de documento.
+    Acepta lenguaje natural ('hoy', 'ayer', 'semana', 'mes', 'mes_pasado', 'año', 'ultimos_30')
+    o fechas YYYY-MM-DD. Sin fechas usa el mes en curso.
     tipo_documento_id: filtrar por tipo (ver configuracion)."""
-    try:
-        ts_inicio = _ts(fecha_inicio)
-        ts_fin    = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    ts_inicio, ts_fin, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin)
 
     params: dict = {
         "emissiondaterange": f"[{ts_inicio},{ts_fin}]",
@@ -51,7 +49,7 @@ async def resumen_ventas(
         }
 
     return {
-        "periodo":             {"desde": fecha_inicio, "hasta": fecha_fin},
+        "periodo":             {"desde": desde, "hasta": hasta},
         "bsale_count":         bsale_count,
         "documentos_emitidos": total_docs,
         "financiero": {
@@ -67,15 +65,12 @@ async def resumen_ventas(
 @mcp.tool()
 @_monitor
 async def resumen_pagos(
-    fecha_inicio: str, fecha_fin: str, sucursal_id: int = None,
+    fecha_inicio: str = None, fecha_fin: str = None, sucursal_id: int = None,
 ) -> dict:
-    """Desglose por medio de pago (efectivo, tarjeta, etc.) filtrado por fecha de emisión.
-    Usa sucursal_id para acotar resultados. Sin sucursal analiza hasta 100 documentos."""
-    try:
-        ts_inicio = _ts(fecha_inicio)
-        ts_fin    = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    """¿Cómo pagaron? Desglose por medio de pago (efectivo, tarjeta, etc.) por fecha de emisión.
+    Acepta lenguaje natural ('hoy', 'mes', 'mes_pasado', ...) o YYYY-MM-DD; sin fechas, mes en curso.
+    Usa sucursal_id para acotar. Sin sucursal analiza hasta 100 documentos."""
+    ts_inicio, ts_fin, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin)
 
     params_docs: dict = {"emissiondaterange": f"[{ts_inicio},{ts_fin}]"}
     if sucursal_id:
@@ -85,7 +80,7 @@ async def resumen_pagos(
     docs = await _paginar("documents.json", params_docs, max_registros=max_docs)
 
     if not docs:
-        return _compact({"periodo": {"desde": fecha_inicio, "hasta": fecha_fin},
+        return _compact({"periodo": {"desde": desde, "hasta": hasta},
                          "total_bruto": 0, "moneda": "CLP", "por_medio_pago": {}})
 
     async def _pagos_doc(doc_id: int) -> list:
@@ -109,7 +104,7 @@ async def resumen_pagos(
         total_bruto += monto
 
     return _compact({
-        "periodo":               {"desde": fecha_inicio, "hasta": fecha_fin},
+        "periodo":               {"desde": desde, "hasta": hasta},
         "documentos_analizados": len(docs),
         "total_bruto":           round(total_bruto),
         "moneda":                "CLP",
@@ -122,21 +117,18 @@ async def resumen_pagos(
 
 @mcp.tool()
 @_monitor
-async def ranking_vendedores(fecha_inicio: str, fecha_fin: str) -> dict:
-    """Ventas por vendedor en un período con canal y sucursal identificados.
-    1 llamada a Bsale. Útil para desempeño del equipo de ventas."""
-    try:
-        ts_inicio = _ts(fecha_inicio)
-        ts_fin    = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+async def ranking_vendedores(fecha_inicio: str = None, fecha_fin: str = None) -> dict:
+    """¿Quién vendió más? Ventas por vendedor con canal y sucursal. 1 llamada a Bsale.
+    Acepta lenguaje natural ('hoy', 'mes', 'mes_pasado', 'año', ...) o YYYY-MM-DD;
+    sin fechas usa el mes en curso."""
+    ts_inicio, ts_fin, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin)
 
     vendedores = await _fetch_sellers(ts_inicio, ts_fin)
     if isinstance(vendedores, dict) and "error" in vendedores:
         return vendedores
 
     return {
-        "periodo":    {"desde": fecha_inicio, "hasta": fecha_fin},
+        "periodo":    {"desde": desde, "hasta": hasta},
         "total":      sum(v.get("ventas", 0) for v in vendedores),
         "moneda":     "CLP",
         "vendedores": vendedores,
@@ -145,14 +137,11 @@ async def ranking_vendedores(fecha_inicio: str, fecha_fin: str) -> dict:
 
 @mcp.tool()
 @_monitor
-async def resumen_por_canal(fecha_inicio: str, fecha_fin: str) -> dict:
-    """Ventas agrupadas por canal (Tienda / Internet / B2B / Widit) usando el mapa de vendedores.
-    Incluye participación porcentual de cada canal. 1 llamada a Bsale."""
-    try:
-        ts_inicio = _ts(fecha_inicio)
-        ts_fin    = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+async def resumen_por_canal(fecha_inicio: str = None, fecha_fin: str = None) -> dict:
+    """¿Cuánto vendió cada canal? Ventas agrupadas por canal (Tienda / Internet / B2B / Widit)
+    con participación porcentual. 1 llamada a Bsale.
+    Acepta lenguaje natural o YYYY-MM-DD; sin fechas usa el mes en curso."""
+    ts_inicio, ts_fin, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin)
 
     vendedores = await _fetch_sellers(ts_inicio, ts_fin)
     if isinstance(vendedores, dict) and "error" in vendedores:
@@ -178,7 +167,7 @@ async def resumen_por_canal(fecha_inicio: str, fecha_fin: str) -> dict:
     )
 
     return {
-        "periodo":   {"desde": fecha_inicio, "hasta": fecha_fin},
+        "periodo":   {"desde": desde, "hasta": hasta},
         "total":     round(total),
         "moneda":    "CLP",
         "por_canal": desglose,
@@ -187,15 +176,11 @@ async def resumen_por_canal(fecha_inicio: str, fecha_fin: str) -> dict:
 
 @mcp.tool()
 @_monitor
-async def ventas_meli(fecha_inicio: str, fecha_fin: str) -> dict:
-    """Ventas de Mercado Libre detectadas por email @marketplace.com del cliente.
-    Pagina todos los documentos del período, busca el cliente de cada uno y filtra por email.
-    Fechas en YYYY-MM-DD."""
-    try:
-        ts_i = _ts(fecha_inicio)
-        ts_f = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+async def ventas_meli(fecha_inicio: str = None, fecha_fin: str = None) -> dict:
+    """Ventas de Mercado Libre (detectadas por email @marketplace.com del cliente).
+    Pagina los documentos del período, busca el cliente de cada uno y filtra por email.
+    Acepta lenguaje natural o YYYY-MM-DD; sin fechas usa el mes en curso."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin)
 
     docs = await _paginar(
         "documents.json",
@@ -203,7 +188,7 @@ async def ventas_meli(fecha_inicio: str, fecha_fin: str) -> dict:
         max_registros=2000,
     )
     if not docs:
-        return {"periodo": {"desde": fecha_inicio, "hasta": fecha_fin},
+        return {"periodo": {"desde": desde, "hasta": hasta},
                 "total_ventas": 0, "total_pedidos": 0, "moneda": "CLP", "documentos": []}
 
     client_ids = list({
@@ -248,7 +233,7 @@ async def ventas_meli(fecha_inicio: str, fecha_fin: str) -> dict:
     ticket_promedio = round(total_ventas / len(meli_docs)) if meli_docs else 0
 
     return _compact({
-        "periodo":         {"desde": fecha_inicio, "hasta": fecha_fin},
+        "periodo":         {"desde": desde, "hasta": hasta},
         "total_ventas":    round(total_ventas),
         "total_pedidos":   len(meli_docs),
         "ticket_promedio": ticket_promedio,

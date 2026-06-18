@@ -93,9 +93,16 @@ async def buscar_variante(consulta: str, por: str = "codigo") -> dict:
 
 @mcp.tool()
 @_monitor
-async def precio_variante(variante_id: int, lista_precio_id: int) -> dict:
-    """Precio de una variante en una lista de precio.
-    Usa configuracion('listas_precio') para obtener IDs de listas."""
+async def precio_variante(variante_id: int, lista_precio_id: int = None) -> dict:
+    """Precio de venta de una variante (neto y bruto con IVA). Para '¿a cuánto vendo X?'.
+    Si no indicas lista_precio_id usa la primera lista activa
+    (ver configuracion('listas_precio') para elegir otra)."""
+    if not lista_precio_id:
+        pls = await _request("GET", "price_lists.json", params={"limit": 50})
+        activas = [p for p in pls.get("items", []) if p.get("state") == 0] if "error" not in pls else []
+        if not activas:
+            return {"error": "No se encontró una lista de precio activa."}
+        lista_precio_id = activas[0]["id"]
     data = await _request("GET", f"price_lists/{lista_precio_id}/details.json",
                           params={"variantid": variante_id, "limit": 1})
     if "error" in data:

@@ -1,6 +1,6 @@
 from config import mcp, MAX_LIMIT
 from http_client import _request
-from transforms import _slim_devolucion, _slim_despacho, _compact, _ts, _fecha
+from transforms import _slim_devolucion, _slim_despacho, _compact, _fecha, _parse_periodo
 from monitor import _monitor
 
 
@@ -10,14 +10,14 @@ async def listar_devoluciones(
     fecha_inicio: str = None, fecha_fin: str = None,
     sucursal_id: int = None, limite: int = 25,
 ) -> dict:
-    """Lista devoluciones de un período. Fechas en YYYY-MM-DD."""
+    """Lista devoluciones de un período. Fechas en lenguaje natural ('hoy', 'mes',
+    'mes_pasado', ...) o YYYY-MM-DD; sin fecha lista las más recientes."""
     params: dict = {"limit": min(max(1, limite), MAX_LIMIT), "offset": 0}
     if sucursal_id: params["officeid"] = sucursal_id
-    try:
-        if fecha_inicio: params["returndatestart"] = _ts(fecha_inicio)
-        if fecha_fin:    params["returndateend"]   = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    ts_i, ts_f, _, _ = _parse_periodo(fecha_inicio, fecha_fin, por_defecto=None)
+    if ts_i is not None:
+        params["returndatestart"] = ts_i
+        params["returndateend"]   = ts_f
     data = await _request("GET", "returns.json", params=params)
     if "error" in data:
         return data
@@ -34,14 +34,14 @@ async def listar_despachos(
     fecha_inicio: str = None, fecha_fin: str = None,
     sucursal_id: int = None, limite: int = 25,
 ) -> dict:
-    """Despachos/envíos de un período. state: 0=pendiente, 1=despachado."""
+    """Despachos/envíos de un período. state: 0=pendiente, 1=despachado.
+    Fechas en lenguaje natural o YYYY-MM-DD; sin fecha lista los más recientes."""
     params: dict = {"limit": min(max(1, limite), MAX_LIMIT), "offset": 0}
     if sucursal_id: params["officeid"] = sucursal_id
-    try:
-        if fecha_inicio: params["shippingdatestart"] = _ts(fecha_inicio)
-        if fecha_fin:    params["shippingdateend"]   = _ts(fecha_fin) + 86399
-    except ValueError:
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    ts_i, ts_f, _, _ = _parse_periodo(fecha_inicio, fecha_fin, por_defecto=None)
+    if ts_i is not None:
+        params["shippingdatestart"] = ts_i
+        params["shippingdateend"]   = ts_f
     data = await _request("GET", "shippings.json", params=params)
     if "error" in data:
         return data
@@ -57,16 +57,14 @@ async def listar_despachos(
 async def documentos_proveedor(
     fecha_inicio: str = None, rut_proveedor: str = None, limite: int = 25,
 ) -> dict:
-    """Facturas de proveedores. fecha_inicio en YYYY-MM filtra por mes (ej: 2026-05)."""
+    """Facturas de proveedores de un mes. fecha_inicio acepta 'mes', 'mes_pasado',
+    YYYY-MM o YYYY-MM-DD (se usa su mes). rut_proveedor para filtrar uno."""
     params: dict = {"limit": min(max(1, limite), MAX_LIMIT), "offset": 0}
     if rut_proveedor: params["clientcode"] = rut_proveedor.strip().upper()
-    try:
-        if fecha_inicio:
-            d = fecha_inicio.strip()
-            params["year"]  = int(d[:4])
-            params["month"] = int(d[5:7])
-    except (ValueError, IndexError):
-        return {"error": "Formato de fecha inválido. Usa YYYY-MM-DD."}
+    _, _, desde, _ = _parse_periodo(fecha_inicio, None, por_defecto=None)
+    if desde:
+        params["year"]  = int(desde[:4])
+        params["month"] = int(desde[5:7])
     data = await _request("GET", "third_party_documents.json", params=params)
     if "error" in data:
         return data

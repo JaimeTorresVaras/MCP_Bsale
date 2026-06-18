@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from http_client import _request, _paginar
 from cache import _cache_get, _cache_set
@@ -6,7 +7,7 @@ from config import _lookup_canal
 
 
 async def _agrupar_stocks(sucursal_id: Optional[int] = None) -> dict[int, dict]:
-    params: dict = {}
+    params: dict = {"expand": "[variant]"}
     if sucursal_id:
         params["officeid"] = sucursal_id
     items = await _paginar("stocks.json", params, max_registros=2000)
@@ -17,14 +18,38 @@ async def _agrupar_stocks(sucursal_id: Optional[int] = None) -> dict[int, dict]:
         if not vid:
             continue
         if vid not in resultado:
-            desc = (v.get("description") or "").strip()
             code = (v.get("code") or "").strip()
             resultado[vid] = {
-                "stock":  0.0,
-                "nombre": f"{code} {desc}".strip() or f"Variante {vid}",
-                "sku":    code,
+                "stock":       0.0,
+                "sku":         code,
+                "producto_id": (v.get("product") or {}).get("id"),
+                "nombre":      code or f"Variante {vid}",
             }
         resultado[vid]["stock"] += float(item.get("quantity") or 0)
+    return resultado
+
+
+async def _nombres_de_productos(ids) -> dict[int, str]:
+    """Resuelve {producto_id: nombre} en lotes paralelos, con caché por id."""
+    resultado: dict[int, str] = {}
+    pendientes: list[int] = []
+    for pid in {int(i) for i in ids if i}:
+        cached = _cache_get(f"prod_name_{pid}")
+        if cached is not None:
+            resultado[pid] = cached
+        else:
+            pendientes.append(pid)
+
+    async def _uno(pid: int) -> tuple[int, Optional[str]]:
+        d = await _request("GET", f"products/{pid}.json")
+        return pid, (d.get("name") if "error" not in d else None)
+
+    for i in range(0, len(pendientes), 10):
+        lote = await asyncio.gather(*[_uno(p) for p in pendientes[i:i + 10]])
+        for pid, nombre in lote:
+            if nombre:
+                _cache_set(f"prod_name_{pid}", nombre)
+                resultado[pid] = nombre
     return resultado
 
 
