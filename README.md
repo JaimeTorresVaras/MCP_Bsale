@@ -11,8 +11,8 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 |---|---|
 | `listar_clientes` | Buscar clientes por nombre, email o RUT |
 | `crear_cliente` | Crear un nuevo cliente |
-| `buscar_producto` | Busca por nombre exacto o aproximado (fuzzy) |
-| `consultar_stock` | Stock disponible por variante o sucursal |
+| `buscar_producto` | Busca por nombre parcial; admite varias palabras en cualquier orden |
+| `consultar_stock` | Stock disponible por producto, variante o sucursal |
 | `top_stock` | Ranking de variantes con más stock |
 | `analizar_stock_critico` | SKUs bajo un umbral de reposición |
 | `configuracion` | Sucursales, tipos de doc, listas de precio, etc. |
