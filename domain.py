@@ -32,7 +32,7 @@ async def _agrupar_stocks(sucursal_id: Optional[int] = None) -> dict[int, dict]:
             }
         resultado[vid]["stock"] += float(item.get("quantity") or 0)
     if resultado:
-        _cache_set(clave, resultado, ttl=600)  # 10 min: análisis no repagina cada vez
+        _cache_set(clave, resultado, ttl=1800)  # 30 min (alineado con el cache warming)
     return resultado
 
 
