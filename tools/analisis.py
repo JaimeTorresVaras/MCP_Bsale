@@ -82,6 +82,7 @@ async def ventas_producto(consulta: str, fecha_inicio: str = None, fecha_fin: st
         variantes = await _variantes_de_producto(p["id"])
         unidades = ingreso = costo_total = 0.0
         por_suc: dict = {}
+        por_tipo: dict = {}
         for v in variantes:
             vd = ventas.get(int(v["id"]))
             if not vd:
@@ -92,6 +93,10 @@ async def ventas_producto(consulta: str, fecha_inicio: str = None, fecha_fin: st
             costo_total += c["costo"] * vd["cantidad"]
             for s, q in vd["por_sucursal"].items():
                 por_suc[s] = por_suc.get(s, 0.0) + q
+            for t, tv in vd.get("por_tipo", {}).items():
+                acc = por_tipo.setdefault(t, {"cantidad": 0.0, "ingreso": 0.0})
+                acc["cantidad"] += tv["cantidad"]
+                acc["ingreso"]  += tv["ingreso"]
         margen = ingreso - costo_total
         return _compact({
             "producto_id":       p["id"],
@@ -102,6 +107,10 @@ async def ventas_producto(consulta: str, fecha_inicio: str = None, fecha_fin: st
             "margen_pct":        round(margen / ingreso * 100, 1) if ingreso and costo_total else None,
             "por_sucursal":      [{"sucursal": s, "unidades": round(q, 2)}
                                   for s, q in sorted(por_suc.items(), key=lambda x: -x[1])] or None,
+            "por_tipo_documento": [{"tipo": t, "unidades": round(tv["cantidad"], 2),
+                                    "ingreso": round(tv["ingreso"]),
+                                    "precio_unit": round(tv["ingreso"] / tv["cantidad"]) if tv["cantidad"] else None}
+                                   for t, tv in sorted(por_tipo.items(), key=lambda x: -x[1]["cantidad"])] or None,
         })
 
     resultado = await _en_lotes(_analizar, productos, batch=5)

@@ -196,20 +196,23 @@ async def _en_lotes(fn, items: list, batch: int = 10) -> list:
 
 
 def _es_venta(doc: dict) -> bool:
-    """Excluye notas de crédito / devoluciones / anulaciones del conteo de ventas."""
+    """True solo para documentos de venta (boletas/facturas). Excluye guías de
+    despacho, notas de crédito, devoluciones y anulaciones. Requiere document_type expandido."""
     n = _norm((doc.get("document_type") or {}).get("name") or "")
-    return not any(x in n for x in ("credito", "devolucion", "anulacion"))
+    return bool(n) and not any(x in n for x in ("guia", "credito", "devolucion", "anulacion"))
 
 
 async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
-    """Mapa {variante_id: {cantidad, ingreso, por_sucursal}} de ventas del período.
-    Escanea documentos con líneas y sucursal embebidas (concurrente) y cachea 30 min."""
+    """Mapa {variante_id: {cantidad, ingreso, por_sucursal, por_tipo}} de ventas del período.
+    Escanea documentos con líneas, sucursal y tipo embebidos (concurrente) y cachea 30 min.
+    Cuenta solo ventas reales (boletas/facturas); excluye guías y notas de crédito."""
     clave = f"ventas_var_{ts_i}_{ts_f}"
     cached = _cache_get(clave)
     if cached is not None:
         return cached
 
-    base = {"emissiondaterange": f"[{ts_i},{ts_f}]", "limit": MAX_LIMIT, "expand": "[details,office]"}
+    base = {"emissiondaterange": f"[{ts_i},{ts_f}]", "limit": MAX_LIMIT,
+            "expand": "[details,office,document_type]"}
 
     async def _pagina(off: int) -> list:
         for intento in range(3):  # reintenta ante rate-limit (429) para no perder páginas
@@ -232,15 +235,21 @@ async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
         if not _es_venta(doc):
             continue
         office = (doc.get("office") or {}).get("name") or "Sin sucursal"
+        tipo   = (doc.get("document_type") or {}).get("name") or "Otro"
         for li in ((doc.get("details") or {}).get("items") or []):
             vid = (li.get("variant") or {}).get("id")
             if not vid:
                 continue
             vid = int(vid)
-            e = mapa.setdefault(vid, {"cantidad": 0.0, "ingreso": 0.0, "por_sucursal": {}})
             qty = float(li.get("quantity") or 0)
+            ing = float(li.get("netAmount") or 0)
+            e = mapa.setdefault(vid, {"cantidad": 0.0, "ingreso": 0.0,
+                                      "por_sucursal": {}, "por_tipo": {}})
             e["cantidad"] += qty
-            e["ingreso"]  += float(li.get("netAmount") or 0)
+            e["ingreso"]  += ing
             e["por_sucursal"][office] = e["por_sucursal"].get(office, 0.0) + qty
+            t = e["por_tipo"].setdefault(tipo, {"cantidad": 0.0, "ingreso": 0.0})
+            t["cantidad"] += qty
+            t["ingreso"]  += ing
     _cache_set(clave, mapa, ttl=1800)
     return mapa
