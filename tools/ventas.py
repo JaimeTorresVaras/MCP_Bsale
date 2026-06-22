@@ -1,9 +1,25 @@
 import asyncio
+from datetime import date, timedelta
 from config import mcp
 from http_client import _request, _paginar
-from transforms import _compact, _fecha, _parse_periodo
+from transforms import _compact, _fecha, _parse_periodo, _norm, _rango_ts
 from domain import _fetch_sellers
 from monitor import _monitor
+
+
+async def _totales(ts_i: int, ts_f: int) -> dict:
+    """Totales (neto, bruto, docs) de un rango via documents/summary.json (1 llamada)."""
+    data = await _request("GET", "documents/summary.json",
+                          params={"emissiondaterange": f"[{ts_i},{ts_f}]", "perdocument": 1})
+    if "error" in data:
+        return {"neto": 0, "bruto": 0, "docs": 0}
+    items = data if isinstance(data, list) else (
+        data.get("items") or ([data] if data.get("totalAmount") is not None else []))
+    return {
+        "neto":  round(sum(float(i.get("totalNetAmount", 0) or 0) for i in items)),
+        "bruto": round(sum(float(i.get("totalAmount", 0) or 0) for i in items)),
+        "docs":  sum(int(i.get("count", 0) or 0) for i in items),
+    }
 
 
 @mcp.tool()
@@ -240,3 +256,62 @@ async def ventas_meli(fecha_inicio: str = None, fecha_fin: str = None) -> dict:
         "moneda":          "CLP",
         "documentos":      meli_docs,
     })
+
+
+@mcp.tool()
+@_monitor
+async def comparar_ventas(periodo: str = "mes") -> dict:
+    """Compara las ventas del período actual contra el anterior equivalente.
+    periodo: 'mes' (vs mes pasado) | 'semana' | 'anio' | 'dia' (hoy vs ayer).
+    Para '¿vendimos más que el mes pasado?', '¿cómo vamos vs el año pasado?', '¿crecimos?'."""
+    mapa = {"mes": ("mes", "mes_pasado"), "semana": ("semana", "semana_pasada"),
+            "anio": ("anio", "anio_pasado"), "ano": ("anio", "anio_pasado"),
+            "year": ("anio", "anio_pasado"), "dia": ("hoy", "ayer"), "hoy": ("hoy", "ayer")}
+    actual_kw, prev_kw = mapa.get(_norm(periodo), ("mes", "mes_pasado"))
+    ai, af, a_des, a_has = _parse_periodo(actual_kw)
+    pi, pf, p_des, p_has = _parse_periodo(prev_kw)
+    act, prev = await _totales(ai, af), await _totales(pi, pf)
+    dif = act["neto"] - prev["neto"]
+    return _compact({
+        "comparacion": periodo, "moneda": "CLP",
+        "actual":   {"desde": a_des, "hasta": a_has, "neto": act["neto"], "docs": act["docs"]},
+        "anterior": {"desde": p_des, "hasta": p_has, "neto": prev["neto"], "docs": prev["docs"]},
+        "diferencia_neto": dif,
+        "crecimiento_pct": round(dif / prev["neto"] * 100, 1) if prev["neto"] else None,
+    })
+
+
+@mcp.tool()
+@_monitor
+async def tendencia_ventas(fecha_inicio: str = None, fecha_fin: str = None, agrupar: str = "mes") -> dict:
+    """Evolución de las ventas en el tiempo (serie). agrupar: 'mes' (default) | 'dia'.
+    Para 'muéstrame la tendencia de ventas', 'ventas mes a mes', 'evolución del año'.
+    Sin fechas usa el año en curso por mes."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="anio")
+    d0, d1 = date.fromisoformat(desde), date.fromisoformat(hasta)
+    por_dia = _norm(agrupar) == "dia" and (d1 - d0).days <= 62
+
+    buckets = []  # (etiqueta, ts_i, ts_f)
+    if por_dia:
+        dia = d0
+        while dia <= d1:
+            ti, tf = _rango_ts(dia, dia)
+            buckets.append((dia.isoformat(), ti, tf))
+            dia += timedelta(days=1)
+    else:
+        y, m = d0.year, d0.month
+        while (y, m) <= (d1.year, d1.month):
+            ti, tf, _, _ = _parse_periodo(f"{y}-{m:02d}")
+            buckets.append((f"{y}-{m:02d}", ti, tf))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+    async def _bucket(bk):
+        et, ti, tf = bk
+        t = await _totales(ti, tf)
+        return {"periodo": et, "neto": t["neto"], "docs": t["docs"]}
+
+    serie = []
+    for i in range(0, len(buckets), 8):
+        serie.extend(await asyncio.gather(*[_bucket(b) for b in buckets[i:i + 8]]))
+    return {"agrupar": "dia" if por_dia else "mes",
+            "periodo": {"desde": desde, "hasta": hasta}, "moneda": "CLP", "serie": serie}

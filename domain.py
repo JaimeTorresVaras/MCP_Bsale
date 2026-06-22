@@ -202,11 +202,14 @@ def _es_venta(doc: dict) -> bool:
     return bool(n) and not any(x in n for x in ("guia", "credito", "devolucion", "anulacion"))
 
 
-async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
-    """Mapa {variante_id: {cantidad, ingreso, por_sucursal, por_tipo}} de ventas del período.
-    Escanea documentos con líneas, sucursal y tipo embebidos (concurrente) y cachea 30 min.
+async def _resumen_documentos(ts_i: int, ts_f: int) -> dict:
+    """Escanea los documentos del período (líneas, sucursal, tipo y cliente) en una sola
+    pasada concurrente (reintento 429, caché 30 min) y arma varias agregaciones:
+      - por_variante: {vid: {cantidad, ingreso, por_sucursal, por_tipo}}
+      - por_cliente:  {client_id: {total, docs}}  (total bruto comprado)
+      - totales:      {neto, num_docs}
     Cuenta solo ventas reales (boletas/facturas); excluye guías y notas de crédito."""
-    clave = f"ventas_var_{ts_i}_{ts_f}"
+    clave = f"resumen_docs_{ts_i}_{ts_f}"
     cached = _cache_get(clave)
     if cached is not None:
         return cached
@@ -222,18 +225,29 @@ async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
             await asyncio.sleep(1.5 * (intento + 1))
         return []
 
+    vacio = {"por_variante": {}, "por_cliente": {}, "totales": {"neto": 0.0, "num_docs": 0}}
     primera = await _request("GET", "documents.json", params={**base, "offset": 0})
     if "error" in primera:
-        return {}
+        return vacio
     docs = list(primera.get("items", []))
     offsets = list(range(MAX_LIMIT, primera.get("count", 0), MAX_LIMIT))
     for lote in await _en_lotes(_pagina, offsets, batch=12):
         docs.extend(lote)
 
-    mapa: dict[int, dict] = {}
+    por_variante: dict[int, dict] = {}
+    por_cliente: dict[int, dict] = {}
+    neto_total = 0.0
+    num_docs = 0
     for doc in docs:
         if not _es_venta(doc):
             continue
+        num_docs += 1
+        neto_total += float(doc.get("netAmount") or 0)
+        cid = (doc.get("client") or {}).get("id")
+        if cid:
+            ec = por_cliente.setdefault(int(cid), {"total": 0.0, "docs": 0})
+            ec["total"] += float(doc.get("totalAmount") or 0)
+            ec["docs"]  += 1
         office = (doc.get("office") or {}).get("name") or "Sin sucursal"
         tipo   = (doc.get("document_type") or {}).get("name") or "Otro"
         for li in ((doc.get("details") or {}).get("items") or []):
@@ -243,13 +257,73 @@ async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
             vid = int(vid)
             qty = float(li.get("quantity") or 0)
             ing = float(li.get("netAmount") or 0)
-            e = mapa.setdefault(vid, {"cantidad": 0.0, "ingreso": 0.0,
-                                      "por_sucursal": {}, "por_tipo": {}})
+            e = por_variante.setdefault(vid, {"cantidad": 0.0, "ingreso": 0.0,
+                                              "por_sucursal": {}, "por_tipo": {}})
             e["cantidad"] += qty
             e["ingreso"]  += ing
             e["por_sucursal"][office] = e["por_sucursal"].get(office, 0.0) + qty
             t = e["por_tipo"].setdefault(tipo, {"cantidad": 0.0, "ingreso": 0.0})
             t["cantidad"] += qty
             t["ingreso"]  += ing
-    _cache_set(clave, mapa, ttl=1800)
-    return mapa
+
+    resumen = {"por_variante": por_variante, "por_cliente": por_cliente,
+               "totales": {"neto": neto_total, "num_docs": num_docs}}
+    _cache_set(clave, resumen, ttl=1800)
+    return resumen
+
+
+async def _ventas_por_variante(ts_i: int, ts_f: int) -> dict:
+    """Compat: solo las ventas por variante (ver _resumen_documentos)."""
+    return (await _resumen_documentos(ts_i, ts_f))["por_variante"]
+
+
+async def _nombres_de_clientes(ids) -> dict[int, dict]:
+    """{client_id: {nombre, rut}} en lotes paralelos, con caché por id."""
+    resultado: dict[int, dict] = {}
+    pendientes: list[int] = []
+    for cid in {int(i) for i in ids if i}:
+        cached = _cache_get(f"cli_{cid}")
+        if cached is not None:
+            resultado[cid] = cached
+        else:
+            pendientes.append(cid)
+
+    async def _uno(cid: int):
+        d = await _request("GET", f"clients/{cid}.json")
+        if "error" in d:
+            return cid, None
+        nombre = f"{d.get('firstName','')} {d.get('lastName','')}".strip() or d.get("company") or f"Cliente {cid}"
+        return cid, {"nombre": nombre, "rut": d.get("code")}
+
+    for cid, info in await _en_lotes(_uno, pendientes, batch=10):
+        if info:
+            _cache_set(f"cli_{cid}", info)
+            resultado[cid] = info
+    return resultado
+
+
+async def _info_variantes(vids) -> dict[int, dict]:
+    """{vid: {producto, sku}} resolviendo variante -> producto -> nombre (con caché)."""
+    resultado: dict[int, dict] = {}
+    pendientes: list[int] = []
+    for vid in {int(v) for v in vids if v}:
+        cached = _cache_get(f"varinfo_{vid}")
+        if cached is not None:
+            resultado[vid] = cached
+        else:
+            pendientes.append(vid)
+
+    async def _uno(vid: int):
+        d = await _request("GET", f"variants/{vid}.json")
+        if "error" in d:
+            return vid, None
+        return vid, {"producto_id": (d.get("product") or {}).get("id"), "sku": d.get("code")}
+
+    parciales = {vid: info for vid, info in await _en_lotes(_uno, pendientes, batch=10) if info}
+    nombres = await _nombres_de_productos({i["producto_id"] for i in parciales.values() if i.get("producto_id")})
+    for vid, info in parciales.items():
+        pid = info.get("producto_id")
+        r = {"producto": nombres.get(int(pid)) if pid else None, "sku": info.get("sku")}
+        _cache_set(f"varinfo_{vid}", r)
+        resultado[vid] = r
+    return resultado

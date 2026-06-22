@@ -1,6 +1,6 @@
 from config import mcp, MAX_LIMIT
 from http_client import _request
-from transforms import _slim_documento, _compact, _parse_periodo
+from transforms import _slim_documento, _compact, _parse_periodo, _fecha
 from monitor import _monitor
 
 
@@ -63,3 +63,48 @@ async def obtener_detalle_recurso(tipo: str, recurso_id: int) -> dict:
     if recurso_id <= 0:
         return {"error": "recurso_id debe ser positivo."}
     return _compact(await _request("GET", f"{tipo}/{recurso_id}.json"))
+
+
+@mcp.tool()
+@_monitor
+async def buscar_documento(numero: int, tipo_documento_id: int = None) -> dict:
+    """Busca un documento por su NÚMERO (boleta/factura). Para 'muéstrame la boleta N° 12345'.
+    Un mismo número puede existir en varios tipos; usa tipo_documento_id para acotar
+    (ver configuracion('tipos_documento')). Devuelve cada documento con sus líneas."""
+    params: dict = {"number": numero, "limit": 10,
+                    "expand": "[details,document_type,office,client]"}
+    if tipo_documento_id:
+        params["documenttypeid"] = tipo_documento_id
+    data = await _request("GET", "documents.json", params=params)
+    if "error" in data:
+        return data
+    docs = data.get("items", [])
+    if not docs:
+        return {"nota": f"No se encontró documento con número {numero}."}
+
+    resultado = []
+    for d in docs:
+        cl = d.get("client") or {}
+        cliente = f"{cl.get('firstName','')} {cl.get('lastName','')}".strip() or cl.get("company")
+        resultado.append(_compact({
+            "id":       d.get("id"),
+            "numero":   d.get("number"),
+            "tipo":     (d.get("document_type") or {}).get("name"),
+            "fecha":    _fecha(d.get("emissionDate")),
+            "cliente":  cliente,
+            "rut":      cl.get("code"),
+            "sucursal": (d.get("office") or {}).get("name"),
+            "neto":     d.get("netAmount"),
+            "total":    d.get("totalAmount"),
+            "lineas": [
+                _compact({
+                    "producto":    li.get("note") or (li.get("variant") or {}).get("description"),
+                    "variante_id": (li.get("variant") or {}).get("id"),
+                    "cantidad":    li.get("quantity"),
+                    "precio_unit": li.get("netUnitValue"),
+                    "total_neto":  li.get("netAmount"),
+                })
+                for li in ((d.get("details") or {}).get("items") or [])
+            ],
+        }))
+    return {"total": len(resultado), "documentos": resultado}

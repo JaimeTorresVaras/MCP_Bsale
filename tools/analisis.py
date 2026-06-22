@@ -3,7 +3,8 @@ from transforms import _compact, _parse_periodo
 from domain import (
     _buscar_productos, _variantes_de_producto, _costo_variante, _precio_neto,
     _lista_precio_default, _stock_variante, _agrupar_stocks, _nombres_de_productos,
-    _ventas_por_variante, _en_lotes,
+    _ventas_por_variante, _resumen_documentos, _nombres_de_clientes, _info_variantes,
+    _en_lotes,
 )
 from monitor import _monitor
 
@@ -222,3 +223,127 @@ async def valorizacion_inventario(top: int = 20, sucursal_id: int = None) -> dic
         "nota":              "Aproximado: top por cantidad de los primeros ~1000 registros de inventario.",
         "top":               filas[:max(1, top)],
     }
+
+
+@mcp.tool()
+@_monitor
+async def top_productos_vendidos(fecha_inicio: str = None, fecha_fin: str = None,
+                                 por: str = "unidades", limite: int = 15) -> dict:
+    """Ranking de los productos MÁS VENDIDOS en un período. por: 'unidades' | 'ingreso'.
+    Para '¿qué se vendió más este mes?', 'top/lo más vendido', 'productos estrella'.
+    Período en lenguaje natural (hoy/mes/mes_pasado/año/...) o YYYY-MM-DD; sin fecha usa el mes en curso.
+    La 1ª consulta de un período largo puede tardar (~30-60s); luego usa caché."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="mes")
+    por_variante = (await _resumen_documentos(ts_i, ts_f))["por_variante"]
+    if not por_variante:
+        return {"periodo": {"desde": desde, "hasta": hasta}, "ranking": []}
+    clave = "ingreso" if por == "ingreso" else "cantidad"
+    top = sorted(por_variante.items(), key=lambda x: x[1][clave], reverse=True)[:max(1, limite)]
+    info = await _info_variantes([vid for vid, _ in top])
+    return {
+        "periodo":  {"desde": desde, "hasta": hasta},
+        "orden_por": por, "moneda": "CLP",
+        "ranking": [
+            _compact({
+                "ranking":           i + 1,
+                "producto":          (info.get(vid) or {}).get("producto") or f"Variante {vid}",
+                "sku":               (info.get(vid) or {}).get("sku"),
+                "unidades_vendidas": round(v["cantidad"], 2),
+                "ingreso_neto":      round(v["ingreso"]),
+            })
+            for i, (vid, v) in enumerate(top)
+        ],
+    }
+
+
+@mcp.tool()
+@_monitor
+async def mejores_clientes(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 15) -> dict:
+    """Ranking de clientes por monto comprado en un período (lo que pagaron, con IVA).
+    Para '¿quiénes son mis mejores clientes?', 'clientes que más compran'.
+    Período en lenguaje natural o YYYY-MM-DD; sin fecha usa el año en curso."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="anio")
+    por_cliente = (await _resumen_documentos(ts_i, ts_f))["por_cliente"]
+    if not por_cliente:
+        return {"periodo": {"desde": desde, "hasta": hasta}, "clientes": []}
+    top = sorted(por_cliente.items(), key=lambda x: x[1]["total"], reverse=True)[:max(1, limite)]
+    nombres = await _nombres_de_clientes([cid for cid, _ in top])
+    return {
+        "periodo": {"desde": desde, "hasta": hasta}, "moneda": "CLP",
+        "clientes": [
+            _compact({
+                "cliente":        (nombres.get(cid) or {}).get("nombre") or f"Cliente {cid}",
+                "rut":            (nombres.get(cid) or {}).get("rut"),
+                "total_comprado": round(info["total"]),
+                "compras":        info["docs"],
+            })
+            for cid, info in top
+        ],
+    }
+
+
+@mcp.tool()
+@_monitor
+async def productos_sin_movimiento(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 30) -> dict:
+    """Productos con stock que NO se vendieron en el período (dead stock / capital inmovilizado).
+    Para '¿qué tengo en stock que no se vende?', 'productos sin rotación', 'capital parado'.
+    Período en lenguaje natural o YYYY-MM-DD; sin fecha usa el año en curso."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="anio")
+    agrupado = await _agrupar_stocks()
+    if not agrupado:
+        return {"error": "No se encontraron registros de stock."}
+    vendidos = (await _resumen_documentos(ts_i, ts_f))["por_variante"]
+    sin_venta = [{"vid": vid, **info} for vid, info in agrupado.items()
+                 if info["stock"] > 0 and vendidos.get(vid, {}).get("cantidad", 0) == 0]
+    sin_venta.sort(key=lambda x: x["stock"], reverse=True)
+    candidatos = sin_venta[:max(limite * 4, 80)]   # acota llamadas de costo
+    costos = await _en_lotes(lambda x: _costo_variante(x["vid"]), candidatos, batch=10)
+    for item, c in zip(candidatos, costos):
+        item["capital"] = item["stock"] * c["costo"]
+    candidatos.sort(key=lambda x: x["capital"], reverse=True)
+    top = candidatos[:max(1, limite)]
+    nombres = await _nombres_de_productos({x.get("producto_id") for x in top})
+    return {
+        "periodo": {"desde": desde, "hasta": hasta}, "moneda": "CLP",
+        "total_sin_movimiento": len(sin_venta),
+        "productos": [
+            _compact({
+                "producto":             nombres.get(int(x["producto_id"])) if x.get("producto_id") else x.get("nombre"),
+                "sku":                  x["sku"],
+                "stock":                round(x["stock"], 2),
+                "capital_inmovilizado": round(x["capital"]),
+            })
+            for x in top
+        ],
+    }
+
+
+@mcp.tool()
+@_monitor
+async def margen_periodo(fecha_inicio: str = None, fecha_fin: str = None) -> dict:
+    """Margen bruto estimado del período: ingreso − costo de lo vendido (COGS).
+    Para '¿cuánto margen/ganancia dejé este mes?', 'rentabilidad del período'.
+    El COGS se calcula sobre los productos que más facturan e informa el % de ventas cubierto (aprox honesta).
+    Período en lenguaje natural o YYYY-MM-DD; sin fecha usa el mes en curso."""
+    ts_i, ts_f, desde, hasta = _parse_periodo(fecha_inicio, fecha_fin, por_defecto="mes")
+    por_variante = (await _resumen_documentos(ts_i, ts_f))["por_variante"]
+    if not por_variante:
+        return {"periodo": {"desde": desde, "hasta": hasta}, "ingreso_neto": 0, "nota": "Sin ventas en el período."}
+    ingreso_total = sum(v["ingreso"] for v in por_variante.values())
+    top = sorted(por_variante.items(), key=lambda x: x[1]["ingreso"], reverse=True)[:200]
+    costos = await _en_lotes(lambda kv: _costo_variante(kv[0]), top, batch=10)
+    cogs = ingreso_cubierto = 0.0
+    for (vid, v), c in zip(top, costos):
+        cogs += c["costo"] * v["cantidad"]
+        ingreso_cubierto += v["ingreso"]
+    margen = ingreso_cubierto - cogs
+    return _compact({
+        "periodo": {"desde": desde, "hasta": hasta}, "moneda": "CLP",
+        "ingreso_neto_total":       round(ingreso_total),
+        "ingreso_analizado":        round(ingreso_cubierto),
+        "cobertura_analisis_pct":   round(ingreso_cubierto / ingreso_total * 100, 1) if ingreso_total else 0,
+        "costo_productos_vendidos": round(cogs),
+        "margen_bruto":             round(margen),
+        "margen_pct":               round(margen / ingreso_cubierto * 100, 1) if ingreso_cubierto else None,
+        "nota": "Margen sobre los productos top por ingreso (ver cobertura_analisis_pct); costo promedio aprox.",
+    })

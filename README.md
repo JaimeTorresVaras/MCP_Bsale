@@ -20,10 +20,17 @@ Esta versión soporta **dos modos**: local (stdio) y **remoto (SSE/HTTP para la 
 | `ranking_rentabilidad` | Productos por margen % (más/menos rentables) |
 | `valorizacion_inventario` | Capital invertido en stock (cantidad × costo) |
 | `ventas_producto` | Unidades vendidas, ingreso, margen y sucursales de un producto en un período |
+| `top_productos_vendidos` | Ranking de los productos más vendidos (por unidades o ingreso) |
+| `mejores_clientes` | Ranking de clientes por monto comprado en un período |
+| `productos_sin_movimiento` | Dead stock: productos con stock que no se vendieron (capital parado) |
+| `margen_periodo` | Margen bruto estimado del período (ingreso − costo de lo vendido) |
 | `configuracion` | Sucursales, tipos de doc, listas de precio, etc. |
 | `listar_documentos` | Ventas/documentos con filtros de fecha |
 | `resumen_ventas` | Totales neto/IVA/bruto con desglose por tipo |
+| `comparar_ventas` | Compara un período con el anterior (mes vs mes pasado, etc.) |
+| `tendencia_ventas` | Evolución de ventas en el tiempo (serie por mes o día) |
 | `detalle_documento` | Líneas de un documento específico |
+| `buscar_documento` | Busca un documento (boleta/factura) por su número |
 | `rastrear_historial_cliente` | Últimas 5 compras de un cliente |
 | `resumen_pagos` | Desglose por medio de pago |
 | `ranking_vendedores` | Ventas por vendedor en un período |
@@ -47,6 +54,7 @@ Las herramientas están pensadas para preguntas breves y cotidianas:
 - **Stock:** por nombre de producto (`consultar_stock` con `producto_id`), con nombres de sucursal.
 - **Análisis de rentabilidad:** Bsale entrega costo (`averageCost`) y valorización (`totalCost`); con eso se calcula margen y capital invertido. Para preguntas como *"analiza el vaso frozen"*, *"¿cuánto margino en X?"*, *"¿qué reponer primero?"*, *"¿dónde tengo la plata parada?"*. Nota: productos sin costo cargado en Bsale se muestran sin margen (no como 100%).
 - **Ventas por producto:** `ventas_producto` cruza producto × período × sucursal (unidades, ingreso, margen). Para *"¿cuánto vendí de X este año?"*, *"¿dónde se vendió X?"*. Escanea los documentos del período (la 1ª consulta de un período largo tarda ~30s, luego usa caché de 30 min).
+- **Rankings y tendencias:** `top_productos_vendidos` (*"¿qué se vendió más?"*), `mejores_clientes` (*"¿quién compra más?"*), `comparar_ventas` (*"¿vendimos más que el mes pasado?"*), `tendencia_ventas` (*"evolución mes a mes"*), `margen_periodo` (*"¿cuánto margen dejé?"*), `productos_sin_movimiento` (*"¿qué no rota?"*), `buscar_documento` (*"la boleta N° 12345"*). Las que escanean documentos comparten el mismo caché de 30 min.
 
 ---
 
