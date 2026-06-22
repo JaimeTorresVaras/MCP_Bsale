@@ -39,7 +39,7 @@ async def _clientes_por_nombre(nombre: str, lim: int) -> list:
 @_monitor
 async def listar_clientes(
     consulta: str = None, nombre: str = None,
-    email: str = None, rut: str = None, limite: int = 25,
+    email: str = None, rut: str = None, limite: int = 10,
 ) -> dict:
     """Busca clientes por nombre, email o RUT. 'consulta' detecta el tipo automáticamente
     (ej: 'juan perez', 'juan@mail.com', '76.063.958-3'). Para responder '¿quién es / cuánto

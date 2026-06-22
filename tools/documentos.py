@@ -9,7 +9,7 @@ from monitor import _monitor
 async def listar_documentos(
     fecha_inicio: str = None, fecha_fin: str = None,
     tipo_documento_id: int = None, cliente_id: int = None,
-    limite: int = 25, pagina: int = 0,
+    limite: int = 10, pagina: int = 0,
 ) -> dict:
     """Lista documentos de venta (boletas/facturas) del más reciente al más antiguo.
     Fechas en lenguaje natural ('hoy', 'ayer', 'mes', 'mes_pasado', ...) o YYYY-MM-DD;

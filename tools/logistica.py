@@ -8,7 +8,7 @@ from monitor import _monitor
 @_monitor
 async def listar_devoluciones(
     fecha_inicio: str = None, fecha_fin: str = None,
-    sucursal_id: int = None, limite: int = 25,
+    sucursal_id: int = None, limite: int = 10,
 ) -> dict:
     """Lista devoluciones de un período. Fechas en lenguaje natural ('hoy', 'mes',
     'mes_pasado', ...) o YYYY-MM-DD; sin fecha lista las más recientes."""
@@ -32,7 +32,7 @@ async def listar_devoluciones(
 @_monitor
 async def listar_despachos(
     fecha_inicio: str = None, fecha_fin: str = None,
-    sucursal_id: int = None, limite: int = 25,
+    sucursal_id: int = None, limite: int = 10,
 ) -> dict:
     """Despachos/envíos de un período. state: 0=pendiente, 1=despachado.
     Fechas en lenguaje natural o YYYY-MM-DD; sin fecha lista los más recientes."""
@@ -55,7 +55,7 @@ async def listar_despachos(
 @mcp.tool()
 @_monitor
 async def documentos_proveedor(
-    fecha_inicio: str = None, rut_proveedor: str = None, limite: int = 25,
+    fecha_inicio: str = None, rut_proveedor: str = None, limite: int = 10,
 ) -> dict:
     """Facturas de proveedores de un mes. fecha_inicio acepta 'mes', 'mes_pasado',
     YYYY-MM o YYYY-MM-DD (se usa su mes). rut_proveedor para filtrar uno."""

@@ -181,9 +181,13 @@ async def _stock_variante(vid: int, sucursal_id: Optional[int] = None):
     if sucursal_id:
         p["officeid"] = sucursal_id
     rows = (await _request("GET", "stocks.json", params=p)).get("items", [])
-    total = sum(float(r.get("quantity") or 0) for r in rows)
-    por_suc = [{"sucursal": (r.get("office") or {}).get("name"), "stock": r.get("quantity")}
-               for r in rows]
+    total = 0.0
+    por_suc = []
+    for r in rows:
+        q = float(r.get("quantity") or 0)
+        total += q
+        if q:  # omite sucursales con stock 0 para ahorrar tokens
+            por_suc.append({"sucursal": (r.get("office") or {}).get("name"), "stock": q})
     return total, por_suc
 
 

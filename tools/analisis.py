@@ -193,7 +193,7 @@ async def ranking_rentabilidad(consulta: str = None, orden: str = "mayor", limit
 
 @mcp.tool()
 @_monitor
-async def valorizacion_inventario(top: int = 20, sucursal_id: int = None) -> dict:
+async def valorizacion_inventario(top: int = 12, sucursal_id: int = None) -> dict:
     """Dónde está tu capital: productos con más dinero invertido en stock (cantidad x costo).
     Para '¿cuánto vale mi inventario?', '¿dónde tengo la plata parada?'.
     Aproximado: analiza los de mayor cantidad de los primeros registros de inventario."""
@@ -228,7 +228,7 @@ async def valorizacion_inventario(top: int = 20, sucursal_id: int = None) -> dic
 @mcp.tool()
 @_monitor
 async def top_productos_vendidos(fecha_inicio: str = None, fecha_fin: str = None,
-                                 por: str = "unidades", limite: int = 15) -> dict:
+                                 por: str = "unidades", limite: int = 10) -> dict:
     """Ranking de los productos MÁS VENDIDOS en un período. por: 'unidades' | 'ingreso'.
     Para '¿qué se vendió más este mes?', 'top/lo más vendido', 'productos estrella'.
     Período en lenguaje natural (hoy/mes/mes_pasado/año/...) o YYYY-MM-DD; sin fecha usa el mes en curso.
@@ -258,7 +258,7 @@ async def top_productos_vendidos(fecha_inicio: str = None, fecha_fin: str = None
 
 @mcp.tool()
 @_monitor
-async def mejores_clientes(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 15) -> dict:
+async def mejores_clientes(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 10) -> dict:
     """Ranking de clientes por monto comprado en un período (lo que pagaron, con IVA).
     Para '¿quiénes son mis mejores clientes?', 'clientes que más compran'.
     Período en lenguaje natural o YYYY-MM-DD; sin fecha usa el año en curso."""
@@ -284,7 +284,7 @@ async def mejores_clientes(fecha_inicio: str = None, fecha_fin: str = None, limi
 
 @mcp.tool()
 @_monitor
-async def productos_sin_movimiento(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 30) -> dict:
+async def productos_sin_movimiento(fecha_inicio: str = None, fecha_fin: str = None, limite: int = 15) -> dict:
     """Productos con stock que NO se vendieron en el período (dead stock / capital inmovilizado).
     Para '¿qué tengo en stock que no se vende?', 'productos sin rotación', 'capital parado'.
     Período en lenguaje natural o YYYY-MM-DD; sin fecha usa el año en curso."""
